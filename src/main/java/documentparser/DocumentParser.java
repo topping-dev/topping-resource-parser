@@ -1365,7 +1365,7 @@ public class DocumentParser
 
         Class rClass = Class.forName(clsname, true, child);
 
-        final String _TEMPLATE;
+        final String _TEMPLATE, _TEMPLATE_LR;
         if(kotlin)
 		{
 			_TEMPLATE = "package dev.topping.kotlin\n" +
@@ -1373,6 +1373,7 @@ public class DocumentParser
 					"class LR {\n" +
 					"%s\n" +
 					"}";
+			_TEMPLATE_LR = null;
 		}
         else
 		{
@@ -1385,6 +1386,29 @@ public class DocumentParser
 					"\n" +
 					"_G['LR'] = LR\n" +
 					"return LR";
+			_TEMPLATE_LR = "-- Automatically generated file. DO NOT MODIFY" +
+					"function readOnlyTable (t)\n" +
+					"	local proxy = {}\n" +
+					"	local store = t\n" +
+					"	local mt = {       -- create metatable\n" +
+					"		__index = function(t,k)\n" +
+					"			if type(store[k]) == \"table\" then\n" +
+					"				return store[k]\n" +
+					"			else\n" +
+					"				return LuaRef.withValue(store[k])\n" +
+					"			end\n" +
+					"		end,\n" +
+					"		__newindex = function (t,k,v)\n" +
+					"		  error(\"attempt to update a read-only table\", 2)\n" +
+					"		end\n" +
+					"	}\n" +
+					"	setmetatable(proxy, mt)\n" +
+					"	return proxy\n" +
+					"end\n" +
+					"\n" +
+					"%s\n" +
+					"tLRA = {\n" + "%s" + "}\n" +
+					"_G['LR'] = readOnlyTable(tLRA)";
 		}
 
 		if(rClass == null)
@@ -1393,6 +1417,8 @@ public class DocumentParser
 		Class<?>[] declaredClasses = rClass.getDeclaredClasses();
 
 		StringBuilder sb = new StringBuilder();
+		StringBuilder sbLR = new StringBuilder();
+		StringBuilder sbLRArray = new StringBuilder();
 		HashSet<String> reservedKeywordSet = new HashSet<>();
 		reservedKeywordSet.add("and");
 		reservedKeywordSet.add("end");
@@ -1421,6 +1447,7 @@ public class DocumentParser
 			Field[] declaredFields = declaredClasses[d].getDeclaredFields();
 
 			StringBuilder innerBuilder = new StringBuilder();
+			StringBuilder innerBuilderLR = new StringBuilder();
 			/**
 			 * -------------------------------------------------------------------------------
 			 * ---@class LR
@@ -1469,6 +1496,7 @@ public class DocumentParser
 					} else {
 						innerBuilder.append("---@class ").append(declaredClasses[d].getSimpleName()).append("\n");
 						innerBuilder.append("local ").append(declaredClasses[d].getSimpleName()).append(" = {").append("\n");
+						innerBuilderLR.append("local v").append(declaredClasses[d].getSimpleName()).append(" = {").append("\n");
 					}
 				}
 				String name = declaredFields[i].getName();
@@ -1507,7 +1535,7 @@ public class DocumentParser
 						innerBuilder.append("        val ").append(name).append(" = arrayOf(");
 						for (int k = 0; k < len; ++k)
 						{
-							innerBuilder.append("LuaRef.WithValue(\"").append(name).append("\", ").append(Array.get(o, k)).append(")");
+							innerBuilder.append("LuaRef.withValue(\"").append(name).append("\", ").append(Array.get(o, k)).append(")");
 							if (k + 1 < len)
 							{
 								innerBuilder.append(",");
@@ -1518,7 +1546,7 @@ public class DocumentParser
 					else
 					{
 						innerBuilder.append("        val ").append(name).append(" = ");
-						innerBuilder.append("LuaRef.WithValue(\"@").append(declaredClasses[d].getSimpleName()).append("/").append(name).append("\", ").append(o).append(")");
+						innerBuilder.append("LuaRef.withValue(\"@").append(declaredClasses[d].getSimpleName()).append("/").append(name).append("\", ").append(o).append(")");
 					}
 				}
 				else
@@ -1531,29 +1559,38 @@ public class DocumentParser
 							continue;
 
 						innerBuilder.append(name).append("=");
+						innerBuilderLR.append(name).append("=");
 						innerBuilder.append("{[0] = ");
+						innerBuilderLR.append("{[0] = ");
 						for (int k = 0; k < len; ++k)
 						{
 							innerBuilder.append(Array.get(o, k));
+							innerBuilderLR.append(Array.get(o, k));
 							if (k + 1 < len)
 							{
 								innerBuilder.append(",");
+								innerBuilderLR.append(",");
 							}
 						}
 						innerBuilder.append("}");
+						innerBuilderLR.append("}");
 					}
 					else
 					{
 						innerBuilder.append(name).append("=");
+						innerBuilderLR.append(name).append("=");
 						innerBuilder.append(o);
+						innerBuilderLR.append(o);
 					}
 
 					if (i + 1 < declaredFields.length)
 					{
 						innerBuilder.append(",");
+						innerBuilderLR.append(",");
 					}
 				}
 				innerBuilder.append("\n");
+				innerBuilderLR.append("\n");
 				if(kotlin) {
 					loopCount++;
 					if (loopCount >= loopMax) {
@@ -1561,17 +1598,25 @@ public class DocumentParser
 						loopCount = 0;
 						applyHeader = true;
 						innerBuilder.append("    }").append("\n").append("}").append("\n\n");
+						innerBuilderLR.append("    }").append("\n").append("}").append("\n\n");
 					}
 				}
 			}
 			if(kotlin)
 				innerBuilder.append("    }").append("\n").append("}").append("\n\n");
-			else
+			else {
 				innerBuilder.append("\n}\n").append("LR.").append(declaredClasses[d].getSimpleName()).append(" = ").append(declaredClasses[d].getSimpleName()).append("\n\n");
+				innerBuilderLR.append("}\n").append("local t").append(declaredClasses[d].getSimpleName()).append(" = readOnlyTable(v").append(declaredClasses[d].getSimpleName()).append(")\n");
+				sbLRArray.append(declaredClasses[d].getSimpleName()).append("=t").append(declaredClasses[d].getSimpleName());
+				if (d + 1 < declaredClasses.length) {
+					sbLRArray.append(",");
+				}
+				sbLRArray.append("\n");
+			}
 			sb.append(innerBuilder);
+			sbLR.append(innerBuilderLR);
 		}
 
-		String formatted = String.format(_TEMPLATE, sb.toString());
 		FileOutputStream fs = null;
 
 		File fOutputFolder = new File(outputFolder);
@@ -1581,7 +1626,14 @@ public class DocumentParser
 
 		try
 		{
+			String formatted = String.format(_TEMPLATE, sb);
 			fs = new FileOutputStream(outputFolder + "/LR" + (!kotlin ? ext : ".kt"));
+			fs.write(formatted.getBytes());
+			fs.flush();
+			fs.close();
+
+			formatted = String.format(_TEMPLATE_LR, sbLR, sbLRArray);
+			fs = new FileOutputStream(outputFolder + "/LRR" + (!kotlin ? ext : ".kt"));
 			fs.write(formatted.getBytes());
 			fs.flush();
 			fs.close();
